@@ -1,0 +1,5 @@
+edge-ai-env/
+data/
+outputs/
+__pycache__/
+*.pyc
