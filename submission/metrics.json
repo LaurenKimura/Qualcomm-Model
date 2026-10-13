@@ -5,23 +5,23 @@
     "params_million": 2.2367,
     "size_mb": 8.5103,
     "macs_giga": 0.3262,
-    "latency_ms": 4.4709,
-    "peak_ram_mb": 391.4609,
-    "joules_per_inference": 0.177772
+    "latency_ms": 4.9643,
+    "peak_ram_mb": 470.6758,
+    "joules_per_inference": 0.158465
   },
   "final": {
-    "accuracy": 0.98037,
+    "accuracy": 0.986296,
     "params_million": 2.2367,
     "size_mb": 8.511,
-    "macs_giga": 0.1065,
-    "latency_ms": 3.1682,
-    "peak_ram_mb": 631.9336,
-    "joules_per_inference": 0.085286
+    "macs_giga": 0.1664,
+    "latency_ms": 2.5698,
+    "peak_ram_mb": 478.1094,
+    "joules_per_inference": 0.095902
   },
-  "worst_class_accuracy": 0.95171,
+  "worst_class_accuracy": 0.960474,
   "codecarbon_mode": "tdp_estimate",
   "techniques_applied": [
-    "internal resize to 128"
+    "internal resize to 160"
   ],
   "ai_hub_profile_summary": "Not run yet. Run profile_hub.py after qai-hub configure. If the service is down, submit these local numbers and say so.",
   "measurement_machine": "Windows 10, Intel64 Family 6 Model 140 Stepping 1, GenuineIntel, 16 GB RAM, CPU only"

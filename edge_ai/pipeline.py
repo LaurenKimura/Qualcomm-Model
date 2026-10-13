@@ -12,6 +12,7 @@ import torch
 
 from edge_ai.compress import (
     ResolutionStudent,
+    WEAK_CLASS_WEIGHTS,
     collect_calibration_images,
     export_onnx,
     load_student,
@@ -37,10 +38,118 @@ from edge_ai.report import write_report
 from edge_ai.score import pick_winner, score_candidate
 
 
+def refine(args):
+    """Rebuild the submission around the two measured weaknesses.
+
+    Demo: 128 pixels made River the worst class. Quantizing every layer,
+    including the 10 answers, made Pasture collapse and the 8-bit file slower.
+    This path uses 160 pixels, a short lesson that cares more about those
+    classes, and 8-bit storage only on the convolutions.
+    """
+    from edge_ai.data import load_eurosat, make_loaders
+
+    root = Path(args.root).resolve()
+    print("Refine. Working photo is 160 pixels. Weak land types get extra practice. Convolutions go to 8 bits.")
+    dataset = load_eurosat(root / args.data, download=args.download)
+    train_loader, val_loader, official_split = make_loaders(dataset, root / args.split, args.batch_size)
+    class_names = list(getattr(dataset, "classes", []))
+    student, weight_source = load_student(_optional(root / args.student), demo_imagenet=args.demo_imagenet)
+    notes = [
+        f"Weights: {weight_source}.",
+        "Validation split: official val_split.json." if official_split else "Validation split: temporary 80/20 split with seed 42, because val_split.json was not in the folder. Judges will not accept numbers from this split.",
+        "Refine path: 160-pixel working size, class-weighted repair for River, Pasture, and the crop classes, and static 8-bit convolutions with the final layer left at full precision.",
+    ]
+    out = root / "outputs"
+    submission = root / "submission"
+    out.mkdir(parents=True, exist_ok=True)
+    submission.mkdir(parents=True, exist_ok=True)
+
+    baseline_model = ResolutionStudent(student, 224).eval()
+    macs, params = macs_and_params(baseline_model)
+    baseline = {
+        "name": "baseline",
+        "plain": "starting model, full 224 photo, no channel cut, 32-bit file",
+        "params_million": params / 1e6,
+        "macs_giga": macs / 1e9,
+        "latency_ms": 0.0,
+        "peak_ram_mb": 0.0,
+        "joules_per_inference": 0.0,
+        "codecarbon_mode": "tdp_estimate",
+    }
+    baseline_onnx = out / "baseline_fp32.onnx"
+    if not baseline_onnx.is_file():
+        export_onnx(baseline_model, baseline_onnx)
+    baseline.update(_onnx_accuracy(baseline_onnx, val_loader, None))
+    baseline["size_mb"] = file_megabytes(baseline_onnx)
+    print(_plain_metrics("Starting point", baseline))
+
+    print("Repair lesson at 160 pixels. River and Pasture count more than Forest.")
+    model = ResolutionStudent(_copy_module(student), 160)
+    model = recover(
+        model,
+        train_loader,
+        steps=args.finetune_steps,
+        class_weights=WEAK_CLASS_WEIGHTS,
+    )
+    fp32_path = export_onnx(model.eval(), out / "refine_160_fp32.onnx")
+    calibration = collect_calibration_images(train_loader, max(args.calib_images, 128))
+    int8_path = quantize_static(fp32_path, out / "refine_160_int8.onnx", calibration)
+
+    finished = []
+    for quantized, path in ((False, fp32_path), (True, int8_path)):
+        item = _candidate_from_onnx(
+            name=f"refine_160_{'int8' if quantized else 'fp32'}",
+            plain=_plain_name(160, 0.0, quantized),
+            model=model,
+            onnx_path=path,
+            image_size=160,
+            prune_ratio=0.0,
+            quantized=quantized,
+            loader=val_loader,
+            max_batches=None,
+            skip_energy=True,
+            quick=True,
+        )
+        finished.append(item)
+        print(_plain_metrics(item["plain"], item))
+
+    print("Measuring the starting file and the new files back to back, so memory is comparable.")
+    baseline.update(_measure_onnx_runtime(baseline_onnx, repeats=30, skip_energy=args.skip_energy))
+    baseline["size_mb"] = file_megabytes(baseline_onnx)
+    for item in finished:
+        item.update(_measure_onnx_runtime(Path(item["onnx_path"]), repeats=30, skip_energy=args.skip_energy))
+        item["size_mb"] = file_megabytes(Path(item["onnx_path"]))
+        score_candidate(item, baseline)
+
+    winner = pick_winner(finished, baseline)
+    winner["why"] = _why(winner, baseline)
+    if winner.get("worst_class_accuracy", 0) + 1e-6 < baseline.get("worst_class_accuracy", 0):
+        notes.append("Neither rebuilt file held the starting worst-class accuracy. The submitted file is the better of the two, and the curve shows the gap.")
+    submitted_name = "student_model_int8.onnx" if winner["quantized"] else "student_model_fp32.onnx"
+    for stale in submission.glob("student_model_*.onnx"):
+        stale.unlink()
+    submitted_path = submission / submitted_name
+    submitted_path.write_bytes(Path(winner["onnx_path"]).read_bytes())
+    winner["size_mb"] = file_megabytes(submitted_path)
+    score_candidate(winner, baseline)
+
+    metrics = _metrics_json(args.team_name, baseline, winner)
+    (submission / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    _write_curve(submission / "tradeoff.csv", [baseline, *finished])
+    _plot_curve(submission / "tradeoff.png", finished, winner)
+    write_report(submission / "REPORT.md", args.team_name, baseline, winner, finished, notes, class_names)
+    print()
+    print(_plain_metrics("Submitted", winner))
+    print(f"Folder to hand in: {submission}")
+
+
 def run(args):
     root = Path(args.root).resolve()
     if args.self_test:
         self_test(root)
+        return
+    if args.refine:
+        refine(args)
         return
 
     from edge_ai.data import load_eurosat, make_loaders
@@ -243,7 +352,13 @@ def _build_finalist(probe, pruned, train_loader, teacher, args, out, calibration
     if args.finetune_steps > 0:
         print(f"  Short recovery training for { _plain_name(size, ratio, False) }...")
         try:
-            model = recover(model, train_loader, steps=args.finetune_steps, teacher=teacher)
+            model = recover(
+                model,
+                train_loader,
+                steps=args.finetune_steps,
+                teacher=teacher,
+                class_weights=WEAK_CLASS_WEIGHTS,
+            )
         except Exception as error:
             notes.append(f"Recovery training failed for prune {ratio:.0%} size {size}: {error}")
             print(f"  Recovery training failed: {error}")
@@ -367,8 +482,14 @@ def _onnx_accuracy(path: Path, loader, max_batches):
 
 
 def _measure_onnx_runtime(path: Path, repeats: int, skip_energy: bool):
+    import gc
+
     import onnxruntime as ort
 
+    # Demo: drop leftover networks before the memory sample, or the reading
+    # includes models we already finished with and the final file looks hungrier
+    # than it is.
+    gc.collect()
     session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     dummy = np.random.randn(1, 3, 224, 224).astype(np.float32)
 

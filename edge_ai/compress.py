@@ -31,8 +31,19 @@ from torch import nn
 from torch.nn import functional as F
 
 
+# Demo: these land types look alike after the photo is shrunk.
+# AnnualCrop, Highway, Pasture, PermanentCrop, and River get a heavier penalty
+# during the short repair lesson so the weak class is not ignored.
+WEAK_CLASS_WEIGHTS = [1.4, 1.0, 1.0, 1.3, 1.0, 2.0, 1.8, 1.0, 2.2, 1.0]
+
+
 class ResolutionStudent(nn.Module):
-    """A wrapper that accepts 224 by 224 and immediately shrinks the photo."""
+    """Accepts the required 224 by 224 photo, then shrinks it before the real work.
+
+    Demo: the contest photos are 64 by 64 stretched to 224. A river is a thin
+    line. 128 pixels blurs that line into a road or a lake. 160 is the smallest
+    size that kept every land type above the starting worst class.
+    """
 
     def __init__(self, student: nn.Module, image_size: int):
         super().__init__()
@@ -40,6 +51,7 @@ class ResolutionStudent(nn.Module):
         self.image_size = int(image_size)
 
     def forward(self, x):
+        # Demo: judges still send 224 by 224. The shrink happens inside the file.
         if self.image_size != 224:
             x = F.interpolate(
                 x,
@@ -165,12 +177,12 @@ def _make_pruner(tp, model, example, ratio, ignored):
     return pruner_class(model, example, **kwargs)
 
 
-def recover(model, train_loader, steps: int, teacher=None, lr: float = 1e-4):
-    """A short study session after pruning.
+def recover(model, train_loader, steps: int, teacher=None, lr: float = 1e-4, class_weights=None):
+    """A short study session after a change.
 
-    Pruning rips out pieces. A few hundred updates let the remaining pieces
-    adjust. If a teacher network is passed, the student also copies the
-    teacher's soft answers, not only the hard land-type name.
+    Demo: eighty updates is a patch, not a new training run. A full lesson
+    will not finish on a CPU in one day. The class weights make a miss on
+    River or Pasture count more than a miss on Forest.
     """
     if steps <= 0:
         model.eval()
@@ -178,7 +190,8 @@ def recover(model, train_loader, steps: int, teacher=None, lr: float = 1e-4):
 
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    hard_loss = nn.CrossEntropyLoss()
+    weight = None if class_weights is None else torch.tensor(class_weights, dtype=torch.float32)
+    hard_loss = nn.CrossEntropyLoss(weight=weight)
     soft_loss = nn.KLDivLoss(reduction="batchmean")
     temperature = 4.0
     done = 0
@@ -271,14 +284,21 @@ def collect_calibration_images(loader, limit: int) -> np.ndarray:
 
 
 def quantize_static(onnx_path: Path, output_path: Path, images: np.ndarray) -> Path:
-    """Turn a float ONNX file into a static QDQ int8 file."""
+    """Turn a float ONNX file into a static QDQ int8 file.
+
+    Demo: only the convolutions are stored as 8-bit integers. The last layer,
+    the one that prints the 10 land-type scores, stays at full precision.
+    Quantizing that layer was what knocked Pasture and River down. The scales
+    are chosen with entropy on real training photos, which is steadier than
+    taking the single darkest and brightest pixel.
+    """
     from onnxruntime.quantization import CalibrationMethod, QuantFormat, QuantType
     from onnxruntime.quantization import quantize_static as ort_quantize
 
     prepared = output_path.with_name(output_path.stem + "_prepared.onnx")
     _prepare_for_quant(onnx_path, prepared)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    ort_quantize(
+    shared = dict(
         model_input=str(prepared),
         model_output=str(output_path),
         calibration_data_reader=ListCalibrationReader(images),
@@ -286,9 +306,15 @@ def quantize_static(onnx_path: Path, output_path: Path, images: np.ndarray) -> P
         per_channel=True,
         weight_type=QuantType.QInt8,
         activation_type=QuantType.QUInt8,
-        calibrate_method=CalibrationMethod.MinMax,
-        op_types_to_quantize=["Conv", "MatMul", "Gemm"],
+        # Conv weights are almost the whole file. Gemm is the 10-answer layer.
+        op_types_to_quantize=["Conv"],
     )
+    try:
+        shared["calibration_data_reader"].rewind()
+        ort_quantize(calibrate_method=CalibrationMethod.Entropy, **shared)
+    except Exception:
+        shared["calibration_data_reader"].rewind()
+        ort_quantize(calibrate_method=CalibrationMethod.MinMax, **shared)
     _strip_duplicate_value_info(output_path)
     return output_path
 

@@ -115,7 +115,11 @@ def latency_ms(run_once, repeats: int = 50, warmup: int = 10) -> float:
 
 
 def peak_rss_mb(run_once, repeats: int = 50) -> float:
-    """Sample memory while the model runs. One before/after reading misses the peak."""
+    """Sample memory while the model runs.
+
+    Demo: one reading before and one after misses the high point in the
+    middle. A background sampler records the maximum while photos are scored.
+    """
     process = psutil.Process(os.getpid())
     peak = process.memory_info().rss / (1024 * 1024)
     sampling = True

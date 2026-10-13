@@ -88,12 +88,28 @@ def score_candidate(candidate: dict, baseline: dict) -> float:
 
 
 def pick_winner(candidates: list[dict], baseline: dict) -> dict:
-    """Prefer a model that still has 97% of the starting accuracy.
+    """Keep accuracy, then the worst land type, then the smaller file.
 
-    A huge shrink that forgets one land type loses the 25-point accuracy
-    bucket, and often loses the contest with it.
+    Demo: 128 pixels had a higher speed score and was picked first. It also
+    made River the worst class. A candidate is now set aside when its worst
+    land type falls below the starting model's worst land type.
     """
-    safe = [item for item in candidates if item.get("accuracy_kept", 0) >= 0.97]
+    worst_floor = baseline.get("worst_class_accuracy", 0)
+
+    def holds_worst_class(item) -> bool:
+        return item.get("accuracy_kept", 0) >= 0.97 and item.get("worst_class_accuracy", 0) + 1e-6 >= worst_floor
+
+    safe = [item for item in candidates if holds_worst_class(item)]
+    if not safe:
+        safe = [item for item in candidates if item.get("accuracy_kept", 0) >= 0.97]
     pool = safe or candidates
-    # Same score: take the smaller file, then the thinner network.
-    return max(pool, key=lambda item: (item.get("score", 0), item.get("size_ratio", 0), item.get("params_ratio", 0)))
+    # Same score: smaller file, then fewer weights, then the stronger weak class.
+    return max(
+        pool,
+        key=lambda item: (
+            item.get("score", 0),
+            item.get("size_ratio", 0),
+            item.get("params_ratio", 0),
+            item.get("worst_class_accuracy", 0),
+        ),
+    )
