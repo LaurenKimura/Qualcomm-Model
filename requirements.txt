@@ -1,0 +1,15 @@
+# Contest packages from the Software Track packet, plus torch-pruning.
+# torch-pruning is what actually deletes whole channels. The built-in
+# PyTorch pruner only writes zeros, and zeros do not make the file smaller.
+torch
+torchvision
+torchaudio
+onnx
+onnxscript
+onnxruntime
+thop
+codecarbon
+psutil
+matplotlib
+torch-pruning
+qai-hub
