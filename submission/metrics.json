@@ -1,24 +1,24 @@
 {
-  "team_name": "REPLACE_ME",
+  "team_name": "Small World",
   "baseline": {
     "accuracy": 0.991852,
     "params_million": 2.2367,
     "size_mb": 8.5103,
     "macs_giga": 0.3262,
-    "latency_ms": 4.9643,
-    "peak_ram_mb": 470.6758,
-    "joules_per_inference": 0.158465
+    "latency_ms": 16.6438,
+    "peak_ram_mb": 282.832,
+    "joules_per_inference": 0.283872
   },
   "final": {
-    "accuracy": 0.986296,
+    "accuracy": 0.989074,
     "params_million": 2.2367,
     "size_mb": 8.511,
     "macs_giga": 0.1664,
-    "latency_ms": 2.5698,
-    "peak_ram_mb": 478.1094,
-    "joules_per_inference": 0.095902
+    "latency_ms": 9.379,
+    "peak_ram_mb": 294.0625,
+    "joules_per_inference": 0.517946
   },
-  "worst_class_accuracy": 0.960474,
+  "worst_class_accuracy": 0.974308,
   "codecarbon_mode": "tdp_estimate",
   "techniques_applied": [
     "internal resize to 160"

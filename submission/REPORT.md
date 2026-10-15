@@ -1,29 +1,29 @@
-# REPLACE_ME: shrinking a satellite-photo classifier
+# Small World: shrinking a satellite-photo classifier
 
 The starting model already names the land in a satellite photo. Our job was to keep that skill and cut the size, the wait, and the energy.
 
 ## What we kept
 
-The contest photos start as 64 by 64 pixels and are stretched to 224. We accept the required 224 by 224 input, then shrink it to 160 inside the file. Channel deletion cost more accuracy than it saved, so the submitted network keeps the original channels. This file stays 32-bit. The 8-bit copy is on the curve and scored worse on the combined tradeoff, usually because it was slower or less accurate. It keeps 99.4% of the starting accuracy and is 1.00x smaller on disk.
+The contest photos start as 64 by 64 pixels and are stretched to 224. We accept the required 224 by 224 input, then shrink it to 160 inside the file. Channel deletion cost more accuracy than it saved, so the submitted network keeps the original channels. This file stays 32-bit. The 8-bit copy is on the curve and scored worse on the combined tradeoff, usually because it was slower or less accurate. It keeps 99.7% of the starting accuracy and is 1.00x smaller on disk.
 
 ## Scoreboard numbers
 
 | | Starting model | Submitted model | How many times smaller or faster |
 |---|---:|---:|---:|
-| Accuracy (share of photos named correctly) | 99.19% | 98.63% | 99.4% kept |
-| Worst land type | 95.85% | 96.05% (PermanentCrop) |  |
+| Accuracy (share of photos named correctly) | 99.19% | 98.91% | 99.7% kept |
+| Worst land type | 95.85% | 97.43% (PermanentCrop) |  |
 | Parameter count (millions) | 2.24 | 2.24 | 1.00x fewer |
 | File size (MB) | 8.51 | 8.51 | 1.00x smaller |
 | Arithmetic per photo (billion MACs) | 0.326 | 0.166 | 1.96x less |
-| Wait per photo (ms) | 4.96 | 2.57 | 1.93x faster |
-| Peak memory (MB) | 470.7 | 478.1 | 0.98x |
-| Energy per photo (joules) | 0.1585 | 0.0959 | 1.65x less |
+| Wait per photo (ms) | 16.64 | 9.38 | 1.77x faster |
+| Peak memory (MB) | 282.8 | 294.1 | 0.96x |
+| Energy per photo (joules) | 0.2839 | 0.5179 | 0.55x less |
 
 Energy meter mode: tdp_estimate. The laptop could not read a power sensor, so joules are wait-time times a typical wattage. The contest allows that. Baseline and final were measured on the same machine with the same method.
 
 ## What we tried and did not submit
 
-- photo shrunk to 160 inside the model, no channel cut, 8-bit file: accuracy fell by 4.78 percentage points (94.41% versus the start at 99.19%). Parameters became 1.00x smaller and the file 3.30x smaller. Another setting had a better combined score.
+- photo shrunk to 160 inside the model, no channel cut, 8-bit file: accuracy fell by 4.19 percentage points (95.00% versus the start at 99.19%). Parameters became 1.00x smaller and the file 3.30x smaller. Another setting had a better combined score.
 The full curve is in `tradeoff.csv` next to this report. One row was written after every setting.
 
 ## Decisions made before any of those runs
